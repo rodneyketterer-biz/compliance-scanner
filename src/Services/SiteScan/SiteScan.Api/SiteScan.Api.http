@@ -1,0 +1,6 @@
+@SiteScan.Api_HostAddress = http://localhost:5108
+
+GET {{SiteScan.Api_HostAddress}}/weatherforecast/
+Accept: application/json
+
+###
