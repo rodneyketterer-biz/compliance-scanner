@@ -17,39 +17,39 @@ public class UrlCanonicalizerTests
     {
         var input = "HTTP://Example.COM:80/path#frag";
         var outcome = UrlCanonicalizer.CanonicalizeFromUserInput(input);
-        Assert.IsTrue(outcome.Success);
-        Assert.AreEqual("http://example.com/path", outcome.CanonicalUri!.ToString().TrimEnd('/'));
+        Assert.That(outcome.Success, Is.True);
+        Assert.That(outcome.CanonicalUri!.ToString().TrimEnd('/'), Is.EqualTo("http://example.com/path"));
     }
 
     [Test]
     public void EmptyPathBecomesSlash_And_DefaultPortRemoved()
     {
         var outcome = UrlCanonicalizer.CanonicalizeFromUserInput("http://example.com");
-        Assert.IsTrue(outcome.Success);
-        Assert.AreEqual("http://example.com/", outcome.CanonicalUri!.ToString());
+        Assert.That(outcome.Success, Is.True);
+        Assert.That(outcome.CanonicalUri!.ToString(), Is.EqualTo("http://example.com/"));
     }
 
     [Test]
     public void CollapseDuplicateSlashesInPath()
     {
         var outcome = UrlCanonicalizer.CanonicalizeFromUserInput("http://example.com//a///b");
-        Assert.IsTrue(outcome.Success);
-        Assert.AreEqual("/a/b", outcome.CanonicalUri!.AbsolutePath);
+        Assert.That(outcome.Success, Is.True);
+        Assert.That(outcome.CanonicalUri!.AbsolutePath, Is.EqualTo("/a/b"));
     }
 
     [Test]
     public void QueryPreservedVerbatim()
     {
         var outcome = UrlCanonicalizer.CanonicalizeFromUserInput("http://example.com/path?b=2&a=1#x");
-        Assert.IsTrue(outcome.Success);
-        Assert.AreEqual("?b=2&a=1", outcome.CanonicalUri!.Query);
+        Assert.That(outcome.Success, Is.True);
+        Assert.That(outcome.CanonicalUri!.Query, Is.EqualTo("?b=2&a=1"));
     }
 
     [Test]
     public void MissingSchemeIsDetected()
     {
         var outcome = UrlCanonicalizer.CanonicalizeFromUserInput("example.com/path");
-        Assert.IsFalse(outcome.Success);
-        Assert.AreEqual(UrlErrorCode.MissingScheme, outcome.Error!.Code);
+        Assert.That(outcome.Success, Is.False);
+        Assert.That(outcome.Error!.Code, Is.EqualTo(UrlErrorCode.MissingScheme));
     }
 }

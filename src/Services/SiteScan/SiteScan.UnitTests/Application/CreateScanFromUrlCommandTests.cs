@@ -33,9 +33,9 @@ public class CreateScanFromUrlCommandTests
         var handler = new CreateScanFromUrlHandler(new FakeResolver(result), new UrlResolutionOptions());
         var scan = await handler.Handle(new CreateScanFromUrlCommand("http://input.example/"), CancellationToken.None);
 
-        Assert.AreEqual(result.OriginalSubmittedUrl, scan.OriginalSubmittedUrl);
-        Assert.AreEqual(result.CanonicalScanRootUrl, scan.CanonicalScanRootUrl);
-        Assert.AreSame(result.RedirectChain, scan.RedirectChain);
-        Assert.IsNull(scan.ErrorCode);
+        Assert.That(scan.OriginalSubmittedUrl, Is.EqualTo(result.OriginalSubmittedUrl));
+        Assert.That(scan.CanonicalScanRootUrl, Is.EqualTo(result.CanonicalScanRootUrl));
+        Assert.That(scan.RedirectChain, Is.SameAs(result.RedirectChain));
+        Assert.That(scan.ErrorCode, Is.Null);
     }
 }

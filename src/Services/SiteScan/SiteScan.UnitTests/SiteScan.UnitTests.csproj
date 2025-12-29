@@ -24,4 +24,9 @@
     <Folder Include="Application\" />
   </ItemGroup>
 
+  <ItemGroup>
+    <ProjectReference Include="..\SiteScan.Application\SiteScan.Application.csproj" />
+    <ProjectReference Include="..\SiteScan.Domain\SiteScan.Domain.csproj" />
+  </ItemGroup>
+
 </Project>

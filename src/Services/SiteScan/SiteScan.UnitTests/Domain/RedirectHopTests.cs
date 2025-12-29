@@ -12,8 +12,8 @@ public class RedirectHopTests
     {
         var uri = new Uri("http://example.com/");
         var hop = new RedirectHop(uri, 301, "http://example.com/next");
-        Assert.AreEqual(uri, hop.Url);
-        Assert.AreEqual(301, hop.StatusCode);
-        Assert.AreEqual("http://example.com/next", hop.LocationHeader);
+        Assert.That(hop.Url, Is.EqualTo(uri));
+        Assert.That(hop.StatusCode, Is.EqualTo(301));
+        Assert.That(hop.LocationHeader, Is.EqualTo("http://example.com/next"));
     }
 }
