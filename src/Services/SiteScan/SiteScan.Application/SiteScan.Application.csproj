@@ -6,4 +6,13 @@
     <Nullable>enable</Nullable>
   </PropertyGroup>
 
+  <ItemGroup>
+    <Folder Include="Abstractions\" />
+    <Folder Include="Scans\" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\SiteScan.Domain\SiteScan.Domain.csproj" />
+  </ItemGroup>
+
 </Project>
