@@ -1,5 +1,6 @@
 using System.Net;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Options;
 using SiteScan.Application.Abstractions;
 using SiteScan.Domain.UrlResolution;
 using SiteScan.Infrastructure.Http;
@@ -8,20 +9,18 @@ namespace SiteScan.Infrastructure;
 
 public static class DependencyInjection
 {
-    public static IServiceCollection AddUrlResolution(this IServiceCollection services, UrlResolutionOptions options)
+    public static IServiceCollection AddUrlResolutionFromOptions(this IServiceCollection services)
     {
-        services.AddSingleton(options);
-
         services.AddHttpClient(HttpClientNames.UrlResolution)
-            .ConfigurePrimaryHttpMessageHandler(() =>
+            .ConfigurePrimaryHttpMessageHandler(sp =>
             {
-                // Manual redirect handling (required to capture chain and enforce rules)
+                var opts = sp.GetRequiredService<IOptions<UrlResolutionOptions>>().Value;
+
                 return new SocketsHttpHandler
                 {
                     AllowAutoRedirect = false,
                     AutomaticDecompression = DecompressionMethods.All,
-                    // Connect timeout configured per acceptance criteria
-                    ConnectTimeout = options.ConnectTimeout
+                    ConnectTimeout = opts.ConnectTimeout
                 };
             });
 

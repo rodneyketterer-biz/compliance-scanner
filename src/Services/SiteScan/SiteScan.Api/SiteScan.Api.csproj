@@ -11,4 +11,10 @@
     <PackageReference Include="Swashbuckle.AspNetCore" Version="6.6.0" />
   </ItemGroup>
 
+  <ItemGroup>
+    <ProjectReference Include="..\SiteScan.Application\SiteScan.Application.csproj" />
+    <ProjectReference Include="..\SiteScan.Domain\SiteScan.Domain.csproj" />
+    <ProjectReference Include="..\SiteScan.Infrastructure\SiteScan.Infrastructure.csproj" />
+  </ItemGroup>
+
 </Project>
