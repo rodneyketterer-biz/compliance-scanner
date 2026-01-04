@@ -10,6 +10,7 @@
     <Folder Include="Abstractions\" />
     <Folder Include="Crawling\" />
     <Folder Include="Scans\" />
+    <Folder Include="Snapshots\" />
   </ItemGroup>
 
   <ItemGroup>
