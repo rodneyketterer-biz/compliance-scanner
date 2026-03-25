@@ -1,0 +1,7 @@
+<Solution>
+  <Project Path="src/Services/SiteScan/SiteScan.Api/SiteScan.Api.csproj" />
+  <Project Path="src/Services/SiteScan/SiteScan.Application/SiteScan.Application.csproj" />
+  <Project Path="src/Services/SiteScan/SiteScan.Domain/SiteScan.Domain.csproj" />
+  <Project Path="src/Services/SiteScan/SiteScan.Infrastructure/SiteScan.Infrastructure.csproj" />
+  <Project Path="src/Services/SiteScan/SiteScan.UnitTests/SiteScan.UnitTests.csproj" />
+</Solution>
