@@ -49,7 +49,10 @@ public sealed record FetchResult(
     Uri FinalUrl,
     int StatusCode,
     string? ContentType,
-    byte[] Body
+    byte[] Body,
+    // Full response headers (response + content headers) captured from HttpClient.
+    // Null when constructed in test doubles that do not exercise header storage.
+    IReadOnlyDictionary<string, string>? ResponseHeaders = null
 );
 
 public interface IPolitenessGate

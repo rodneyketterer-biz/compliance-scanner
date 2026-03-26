@@ -19,10 +19,24 @@ builder.Services.AddSwaggerGen(c =>
 });
 
 builder.Services.Configure<UrlResolutionOptions>(builder.Configuration.GetSection("UrlResolution"));
-builder.Services.AddUrlResolutionFromOptions(); // or AddUrlResolution(options) depending on your DI helper
+builder.Services.AddUrlResolutionFromOptions();
 builder.Services.AddScoped<IUrlResolver, SiteScan.Infrastructure.Http.HttpUrlResolver>();
 
+// Snapshot storage: SQLite database + file-based HTML blobs.
+// EnsureCreated is called below (in lieu of migrations; tracked as a known gap).
+builder.Services.AddSiteScanDatabase(
+    builder.Configuration.GetConnectionString("SiteScan") ?? "Data Source=sitescan.db");
+builder.Services.AddSnapshotServices(builder.Configuration);
+
 var app = builder.Build();
+
+// Apply DB schema (no migrations yet).
+if (app.Environment.IsDevelopment())
+{
+    using var scope = app.Services.CreateScope();
+    var db = scope.ServiceProvider.GetRequiredService<SiteScan.Infrastructure.Persistence.SiteScanDbContext>();
+    db.Database.EnsureCreated();
+}
 
 // Configure the HTTP request pipeline.
 if (app.Environment.IsDevelopment())

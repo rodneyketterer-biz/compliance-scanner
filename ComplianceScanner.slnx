@@ -4,4 +4,6 @@
   <Project Path="src/Services/SiteScan/SiteScan.Domain/SiteScan.Domain.csproj" />
   <Project Path="src/Services/SiteScan/SiteScan.Infrastructure/SiteScan.Infrastructure.csproj" />
   <Project Path="src/Services/SiteScan/SiteScan.UnitTests/SiteScan.UnitTests.csproj" />
+  <Project Path="src/Test/SiteScan.EndToEndTests/SiteScan.EndToEndTests.csproj" />
+  <Project Path="src/Test/SiteScan.TestApi/SiteScan.TestApi.csproj" />
 </Solution>

@@ -1,3 +1,4 @@
+using SiteScan.Application.Snapshots;
 using SiteScan.Domain.Scanning;
 
 namespace SiteScan.Application.Crawling;
@@ -17,6 +18,7 @@ public sealed class Crawler : ICrawler
     private readonly IHttpFetcher _fetcher;
     private readonly IHtmlLinkExtractor _links;
     private readonly ICrawlRecordWriter _writer;
+    private readonly ISnapshotPersister _snapshots;
 
     public Crawler(
         CrawlerOptions options,
@@ -26,7 +28,8 @@ public sealed class Crawler : ICrawler
         IPolitenessGate politeness,
         IHttpFetcher fetcher,
         IHtmlLinkExtractor links,
-        ICrawlRecordWriter writer)
+        ICrawlRecordWriter writer,
+        ISnapshotPersister snapshots)
     {
         _options = options;
         _canonicalizer = canonicalizer;
@@ -36,6 +39,7 @@ public sealed class Crawler : ICrawler
         _fetcher = fetcher;
         _links = links;
         _writer = writer;
+        _snapshots = snapshots;
     }
 
     public async Task RunAsync(ScanId scanId, Uri scanRootCanonical, CancellationToken ct)
@@ -158,7 +162,24 @@ public sealed class Crawler : ICrawler
             }
             catch (Exception ex)
             {
-                // Still record as fetched attempt (status unknown); you may prefer SkipReason with Notes.
+                var reason = ex switch
+                {
+                    OperationCanceledException => FetchFailureReason.Timeout,
+                    System.Net.Http.HttpRequestException => FetchFailureReason.HttpProtocol,
+                    _ => FetchFailureReason.Unknown
+                };
+
+                // Record the failure in the snapshot store (no HTML snapshot produced).
+                await _snapshots.PersistFailureAsync(
+                    scanId,
+                    item.CanonicalUrl.AbsoluteUri,
+                    DateTimeOffset.UtcNow,
+                    item.Depth,
+                    reason,
+                    $"{ex.GetType().Name}: {ex.Message}",
+                    ct);
+
+                // Also write a crawl-record for the audit log.
                 await _writer.WriteAsync(new CrawlRecord(
                     scanId,
                     item.CanonicalUrl,
@@ -190,11 +211,13 @@ public sealed class Crawler : ICrawler
                 Notes: null
             ), ct);
 
+            // Persist HTML snapshot + headers + metadata for rule evaluation.
+            await _snapshots.PersistSuccessAsync(scanId, fetch, item.Depth, ct);
+
             // Content handling: only HTML => link extraction
             if (!IsHtml(fetch.ContentType))
             {
-                // optional: record that it was non-html, but already recorded as fetched
-                // No link extraction
+                // Non-HTML: already persisted as metadata-only snapshot above.
                 continue;
             }
 

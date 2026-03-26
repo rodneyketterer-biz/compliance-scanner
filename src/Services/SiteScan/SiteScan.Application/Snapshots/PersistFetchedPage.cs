@@ -1,11 +1,32 @@
 using System.Security.Cryptography;
+using SiteScan.Application.Crawling;
 using SiteScan.Domain.Scanning;
 
 namespace SiteScan.Application.Snapshots;
 
-/*This service is what the crawler calls after each fetch to persist the results
- to the database and HTML storage.*/
-public sealed class SnapshotPersister
+/// <summary>
+/// Persists a fetched page's HTML snapshot, response headers, and metadata after
+/// each crawl fetch.  Called by the crawler via <see cref="ISnapshotPersister"/>.
+///
+/// <b>Storage decisions (documented):</b>
+/// <list type="bullet">
+///   <item>HTML is stored as raw bytes (UTF-8 in practice; the byte stream from
+///         HttpClient is stored verbatim so the original encoding is preserved).</item>
+///   <item>When <see cref="SnapshotOptions.UseHeaderAllowlist"/> is <c>true</c>
+///         only the headers in <see cref="HeadersAllowlist.RuleHeaders"/> are kept
+///         (CSP, HSTS, X-Frame-Options, X-Content-Type-Options, Referrer-Policy,
+///         ETag, Content-Type).  Set the option to <c>false</c> to store the full
+///         header set.</item>
+///   <item>The content hash is computed over the <em>stored</em> (possibly
+///         truncated) bytes, not the original, so it is always consistent with
+///         what is retrievable from storage.</item>
+///   <item>Retention is controlled by <see cref="SnapshotOptions.Retention"/>
+///         (default 30 days).  Expired snapshots are removed by calling
+///         <see cref="IPageSnapshotRepository.DeleteOlderThanAsync"/>; no
+///         scheduled job is wired up yet (tracked as a known gap).</item>
+/// </list>
+/// </summary>
+public sealed class SnapshotPersister : ISnapshotPersister
 {
     private readonly IPageSnapshotRepository _repo;
     private readonly IHtmlSnapshotStorage _storage;
@@ -21,47 +42,49 @@ public sealed class SnapshotPersister
         _options = options;
     }
 
+    // ── ISnapshotPersister ──────────────────────────────────────────────────
+
     public async Task PersistSuccessAsync(
         ScanId scanId,
-        string finalUrl,
-        int statusCode,
-        string? contentType,
-        DateTimeOffset fetchedAtUtc,
+        FetchResult fetch,
         int crawlDepth,
-        IReadOnlyDictionary<string, string> responseHeaders,
-        byte[]? responseBodyBytes,                 // raw bytes from HttpClient
         CancellationToken ct)
     {
-        // headers: store allowlisted or full
-        var headersToStore = FilterHeaders(responseHeaders, _options.UseHeaderAllowlist);
+        var fetchedAtUtc = DateTimeOffset.UtcNow;
+
+        var headersToStore = FilterHeaders(
+            fetch.ResponseHeaders ?? new Dictionary<string, string>(),
+            _options.UseHeaderAllowlist);
         var snapshotHeaders = new SnapshotHeaders(headersToStore);
 
-        SnapshotContent? content = null;
-        string? contentHash = null;
+        var isHtml = fetch.ContentType?.StartsWith("text/html", StringComparison.OrdinalIgnoreCase) == true;
 
-        var isHtml = contentType?.StartsWith("text/html", StringComparison.OrdinalIgnoreCase) == true;
-
-        if (isHtml && responseBodyBytes is not null)
+        if (isHtml && fetch.Body.Length > 0)
         {
-            var originalLen = responseBodyBytes.LongLength;
+            var originalLen = (long)fetch.Body.Length;
             var max = _options.MaxHtmlBytesPerPage;
 
-            var storedBytes = responseBodyBytes;
-            var truncated = false;
+            byte[] storedBytes;
+            bool truncated;
 
-            if (storedBytes.Length > max)
+            if (fetch.Body.Length > max)
             {
-                storedBytes = storedBytes.AsSpan(0, max).ToArray();
+                storedBytes = fetch.Body.AsSpan(0, max).ToArray();
                 truncated = true;
             }
+            else
+            {
+                storedBytes = fetch.Body;
+                truncated = false;
+            }
 
-            // hash of stored content (not original) — consistent with "stored content hash"
-            contentHash = ComputeSha256Hex(storedBytes);
+            // Hash computed over stored (possibly truncated) bytes for consistency.
+            var contentHash = ComputeSha256Hex(storedBytes);
 
             var snapshotId = PageSnapshotId.New();
             var storageRef = await _storage.SaveAsync(scanId.Value, snapshotId.Value, storedBytes, ct);
 
-            content = new SnapshotContent(
+            var content = new SnapshotContent(
                 storageRef: storageRef,
                 originalLengthBytes: originalLen,
                 storedLengthBytes: storedBytes.LongLength,
@@ -74,9 +97,9 @@ public sealed class SnapshotPersister
             var snapshot = new PageSnapshot(
                 id: snapshotId,
                 scanId: scanId,
-                finalUrl: finalUrl,
-                statusCode: statusCode,
-                contentType: contentType,
+                finalUrl: fetch.FinalUrl.AbsoluteUri,
+                statusCode: fetch.StatusCode,
+                contentType: fetch.ContentType,
                 fetchedAtUtc: fetchedAtUtc,
                 crawlDepth: crawlDepth,
                 content: content,
@@ -87,7 +110,7 @@ public sealed class SnapshotPersister
             return;
         }
 
-        // Non-HTML: store metadata + headers, but no HTML snapshot content.
+        // Non-HTML: persist metadata + headers only; no HTML blob stored.
         {
             var snapshotId = PageSnapshotId.New();
 
@@ -98,9 +121,9 @@ public sealed class SnapshotPersister
             var snapshot = new PageSnapshot(
                 id: snapshotId,
                 scanId: scanId,
-                finalUrl: finalUrl,
-                statusCode: statusCode,
-                contentType: contentType,
+                finalUrl: fetch.FinalUrl.AbsoluteUri,
+                statusCode: fetch.StatusCode,
+                contentType: fetch.ContentType,
                 fetchedAtUtc: fetchedAtUtc,
                 crawlDepth: crawlDepth,
                 content: null,
@@ -132,6 +155,8 @@ public sealed class SnapshotPersister
         return _repo.AddFailureAsync(failure, ct);
     }
 
+    // ── Private helpers ─────────────────────────────────────────────────────
+
     private static Dictionary<string, string> FilterHeaders(
         IReadOnlyDictionary<string, string> headers,
         bool allowlist)
@@ -139,12 +164,12 @@ public sealed class SnapshotPersister
         if (!allowlist)
             return new Dictionary<string, string>(headers, StringComparer.OrdinalIgnoreCase);
 
-        var set = new HashSet<string>(HeadersAllowlist.RuleHeaders, StringComparer.OrdinalIgnoreCase);
+        var allowed = new HashSet<string>(HeadersAllowlist.RuleHeaders, StringComparer.OrdinalIgnoreCase);
         var filtered = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
 
         foreach (var (k, v) in headers)
         {
-            if (set.Contains(k))
+            if (allowed.Contains(k))
                 filtered[k] = v;
         }
 

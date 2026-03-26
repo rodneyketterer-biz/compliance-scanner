@@ -22,12 +22,21 @@ public sealed class HttpFetcher : IHttpFetcher
         byte[] body = await res.Content.ReadAsByteArrayAsync(ct);
         var contentType = res.Content.Headers.ContentType?.ToString();
 
+        // Capture all response headers (response-level + content-level).
+        // Multi-value headers are joined with ", " per HTTP convention.
+        var headers = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var h in res.Headers)
+            headers[h.Key] = string.Join(", ", h.Value);
+        foreach (var h in res.Content.Headers)
+            headers[h.Key] = string.Join(", ", h.Value);
+
         return new FetchResult(
             RequestedUrl: url,
             FinalUrl: finalUrl,
             StatusCode: (int)res.StatusCode,
             ContentType: contentType,
-            Body: body
+            Body: body,
+            ResponseHeaders: headers
         );
     }
 }

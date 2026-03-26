@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(find C:githubComplianceScanner -maxdepth 3 -name *.sln -o -name *.slnx)",
+      "Bash(dotnet build:*)",
+      "Bash(dotnet test:*)",
+      "Bash(xargs grep:*)"
+    ]
+  }
+}

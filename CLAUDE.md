@@ -22,15 +22,17 @@ compliance-scanner/
 ├── CLAUDE.md                    ← this file
 ├── README.md
 ├── .gitignore
+├── ComplianceScanner.slnx       ← solution file (all projects)
 └── src/
     ├── global.json              ← .NET SDK version pin
-    ├── SiteScan.sln             ← solution file (5 projects)
-    └── Services/SiteScan/
-        ├── SiteScan.Api/        ← ASP.NET Core Web API (entry point)
-        ├── SiteScan.Application/← Use cases, abstractions (ports)
-        ├── SiteScan.Domain/     ← Core business models, no dependencies
-        ├── SiteScan.Infrastructure/ ← Adapters: HTTP, EF Core, file storage
-        └── SiteScan.UnitTests/  ← NUnit test suite
+    ├── Services/SiteScan/
+    │   ├── SiteScan.Api/        ← ASP.NET Core Web API (entry point)
+    │   ├── SiteScan.Application/← Use cases, abstractions (ports)
+    │   ├── SiteScan.Domain/     ← Core business models, no dependencies
+    │   ├── SiteScan.Infrastructure/ ← Adapters: HTTP, EF Core, file storage
+    │   └── SiteScan.UnitTests/  ← NUnit unit test suite
+    └── Test/
+        └── SiteScan.EndToEndTests/ ← NUnit E2E tests (real stack, fake HTTP)
 ```
 
 ---
@@ -59,6 +61,7 @@ Domain ← Application ← Infrastructure
 | Command/Handler | `CreateScanFromUrlCommand` + `CreateScanFromUrlHandler` |
 | Options pattern | `CrawlerOptions`, `UrlResolutionOptions`, `SnapshotOptions` |
 | Factory method | `ScanId.New()`, `PageSnapshotId.New()` |
+| Null Object | `NullSnapshotPersister.Instance` — no-op `ISnapshotPersister` for tests |
 
 ---
 
@@ -78,8 +81,8 @@ All types are records or record structs; immutability is enforced throughout.
 | `Scanning/CrawlRecord.cs` | Records one crawl event (disposition + reason) |
 | `Scanning/CrawlEnums.cs` | `CrawlDisposition` (Fetched/Skipped), `SkipReason` |
 | `Scanning/UrlKey.cs` | Normalized URL for dedup lookups |
-| `Scanning/HeadersAllowlist.cs` | Allowlisted headers to persist |
-| `Scanning/FailedFetch.cs` | Tracks failed fetch attempts |
+| `Scanning/HeadersAllowlist.cs` | Allowlisted headers: CSP, HSTS, X-Frame-Options, X-Content-Type-Options, Referrer-Policy, ETag, Content-Type |
+| `Scanning/FailedFetch.cs` | Tracks failed fetch attempts with reason and message |
 | `UrlResolution/UrlResolutionResult.cs` | Success/failure + redirect chain |
 | `UrlResolution/UrlResolutionError.cs` | Error code + message |
 | `UrlResolution/UrlErrorCode.cs` | Enum of resolution error types |
@@ -91,26 +94,27 @@ All types are records or record structs; immutability is enforced throughout.
 
 | File | Purpose |
 |---|---|
-| `Crawling/Crawler.cs` | Main crawl engine (`ICrawler`) |
+| `Crawling/Crawler.cs` | Main crawl engine (`ICrawler`); calls `ISnapshotPersister` on success and failure |
 | `Crawling/CrawlFrontier.cs` | Thread-safe `ConcurrentQueue`-backed URL frontier |
 | `Crawling/CrawlerOptions.cs` | Limits: pages (500), depth (4), wall-clock (5 min), concurrency (2/host), delay (250 ms) |
-| `Crawling/Ports.cs` | All crawler ports: `ICrawlRecordWriter/Reader`, `IUrlCanonicalizer`, `IScopePolicy`, `IRobotsPolicy`, `IHtmlLinkExtractor`, `IHttpFetcher`, `IPolitenessGate` |
+| `Crawling/Ports.cs` | All crawler ports: `ICrawlRecordWriter/Reader`, `IUrlCanonicalizer`, `IScopePolicy`, `IRobotsPolicy`, `IHtmlLinkExtractor`, `IHttpFetcher`, `IPolitenessGate`; `FetchResult` record (includes `ResponseHeaders`) |
 | `Crawling/ScopePolicy.cs` | `SameHost` / `RegistrableDomain` scope modes |
 | `Crawling/UrlCanonicalizer.cs` | Application-layer URL normalization |
 | `Crawling/TrapDetector.cs` | Detects traps: URL too long, too many query combos per path |
 | `Scans/CreateScanFromUrlCommand.cs` | Command record |
 | `Scans/CreateScanFromUrlHandler.cs` | Validates URL, creates `ScanRecord` |
+| `Snapshots/ISnapshotPersister.cs` | `ISnapshotPersister` port + `NullSnapshotPersister` (null object, use in tests) |
 | `Snapshots/IPageSnapshotRepository.cs` | Persistence port |
 | `Snapshots/IHtmlStorage.cs` | Blob storage port |
-| `Snapshots/PersistFetchedPage.cs` | Orchestrates snapshot persistence |
-| `Snapshots/SnapshotOptions.cs` | Snapshot storage configuration |
+| `Snapshots/PersistFetchedPage.cs` | `SnapshotPersister` — implements `ISnapshotPersister`; stores HTML blob + SHA-256 hash for HTML pages, metadata-only for non-HTML, `FailedFetch` for errors |
+| `Snapshots/SnapshotOptions.cs` | Snapshot storage config: `MaxHtmlBytesPerPage`, `UseHeaderAllowlist`, `RetentionDays`, `HtmlStoragePath` |
 | `UrlResolution/IUrlResolver.cs` | URL resolution port |
 
 ### SiteScan.Infrastructure
 
 | File | Purpose |
 |---|---|
-| `Http/HttpFetcher.cs` | `IHttpFetcher` via `HttpClient`; UA: `SiteScanBot/1.0` |
+| `Http/HttpFetcher.cs` | `IHttpFetcher` via `HttpClient`; UA: `SiteScanBot/1.0`; captures all response + content headers into `FetchResult.ResponseHeaders` |
 | `Http/HttpUrlResolver.cs` | `IUrlResolver`; validates, normalizes, follows redirects |
 | `Http/DependencyInjection.cs` | `AddUrlResolutionFromOptions()` — named client `"UrlResolution"`, no auto-redirect, decompression enabled |
 | `Persistence/SiteScanDbContext.cs` | EF Core 8 DbContext; tables: `page_snapshots`, `failed_fetches` |
@@ -120,12 +124,13 @@ All types are records or record structs; immutability is enforced throughout.
 | `HtmlParsing/AngleSharpLinkExtractor.cs` | `IHtmlLinkExtractor`; extracts `<a href>`, `<link href>` |
 | `Crawling/PolitenessGate.cs` | Per-host rate limiting |
 | `Crawling/RobotsPolicy.cs` | robots.txt fetch and compliance |
+| `DependencyInjection.cs` | `AddSiteScanDatabase(connectionString)` — registers `SiteScanDbContext` with SQLite; `AddSnapshotServices(IConfiguration)` — registers `SnapshotOptions`, `FileHtmlSnapshotStorage`, `EfPageSnapshotRepository`, `SnapshotPersister` |
 
 ### SiteScan.Api
 
 | File | Purpose |
 |---|---|
-| `Program.cs` | DI composition root, middleware pipeline, endpoint registration |
+| `Program.cs` | DI composition root, middleware pipeline, endpoint registration; calls `AddSiteScanDatabase` + `AddSnapshotServices`; calls `db.Database.EnsureCreated()` in Development |
 
 **Current API endpoint:**
 
@@ -141,6 +146,16 @@ Swagger UI is served at the root `/`.
 - `http`  → `http://localhost:5108`
 - `https` → `https://localhost:7108`
 
+### SiteScan.EndToEndTests
+
+End-to-end tests that exercise the full crawler stack (all real production implementations) wired to a `FakeHttpHandler` — no real network requests are made.
+
+| File | Purpose |
+|---|---|
+| `FakeHttpHandler.cs` | `HttpMessageHandler` subclass; maps URLs to pre-configured `FakeResponse` records; returns 404 for unregistered URLs |
+| `CrawlHarness.cs` | Assembles the full crawler stack; exposes `Http` (fake handler) and `WithOptions`; returns `IReadOnlyList<CrawlRecord>` from `InMemoryCrawlStore` |
+| `CrawlDiscoveryTests.cs` | 8 E2E scenarios covering: single page, link discovery, out-of-scope links, max depth, duplicate URLs, robots.txt disallow, max pages limit, non-HTML resources |
+
 ---
 
 ## Development Workflows
@@ -148,21 +163,21 @@ Swagger UI is served at the root `/`.
 ### Prerequisites
 
 - .NET 9 SDK (version pinned in `src/global.json` → `9.0.308`)
-- No Node.js, Docker, or database setup required for unit tests
+- No Node.js, Docker, or database setup required for unit tests or E2E tests
 
 ### Build
 
 ```bash
-dotnet build src/SiteScan.sln
+dotnet build ComplianceScanner.slnx
 ```
 
 ### Run Tests
 
 ```bash
-dotnet test src/SiteScan.sln
+dotnet test ComplianceScanner.slnx
 ```
 
-Code coverage is configured via `coverlet.collector`. All unit tests live in `SiteScan.UnitTests`.
+Code coverage is configured via `coverlet.collector`. Unit tests live in `SiteScan.UnitTests`; end-to-end tests live in `SiteScan.EndToEndTests`.
 
 ### Run the API (development)
 
@@ -175,7 +190,7 @@ Then open `http://localhost:5108` for Swagger UI.
 ### Add a New Project to the Solution
 
 ```bash
-dotnet sln src/SiteScan.sln add <path-to-new.csproj>
+dotnet sln ComplianceScanner.slnx add <path-to-new.csproj>
 ```
 
 ---
@@ -185,10 +200,11 @@ dotnet sln src/SiteScan.sln add <path-to-new.csproj>
 - **Framework:** NUnit 4.2.2 with `NUnit.Analyzers` and `NUnit3TestAdapter`
 - **Style:** Arrange / Act / Assert; method naming: `MethodName_Condition_ExpectedOutcome`
 - **Mocking:** Hand-rolled test doubles defined within each test file (no Moq/NSubstitute)
-  - Examples: `RecordingWriter`, `AllowAllRobots`, `NoOpPoliteness`, `FetcherReturning`, `LinkExtractorReturning`
+  - Examples: `RecordingWriter`, `AllowAllRobots`, `NoOpPoliteness`, `FetcherReturning`, `LinkExtractorReturning`, `SpySnapshotRepository`, `SpyHtmlStorage`
 - **Coverage tool:** `coverlet.collector` (included automatically during `dotnet test`)
+- **No-op persister:** Use `NullSnapshotPersister.Instance` (from `SiteScan.Application`) in any test that constructs a `Crawler` but does not need to assert on snapshot storage
 
-### Test File Mapping
+### Unit Test File Mapping (`SiteScan.UnitTests`)
 
 | Test Class | Unit Under Test |
 |---|---|
@@ -196,6 +212,7 @@ dotnet sln src/SiteScan.sln add <path-to-new.csproj>
 | `CrawlFrontierTests.cs` | `CrawlFrontier.cs` |
 | `TrapDetectorTests.cs` | `TrapDetector.cs` |
 | `ScopePolicyTests.cs` | `ScopePolicy.cs` |
+| `SnapshotPersisterTests.cs` | `SnapshotPersister` (`PersistFetchedPage.cs`) |
 | `UrlCanonicalizerTests.cs` (Application) | Application `UrlCanonicalizer` |
 | `UrlCanonicalizerTests.cs` (Domain) | Domain `UrlCanonicalizer` |
 | `CollapseDuplicateSlashesTests.cs` | Path normalization helper |
@@ -204,6 +221,19 @@ dotnet sln src/SiteScan.sln add <path-to-new.csproj>
 | `ScanIdTests.cs` | `ScanId` value object |
 | `RedirectHopTests.cs` | `RedirectHop` |
 | `CrawlEnumsTests.cs` | Crawl enum values |
+
+### End-to-End Test Scenarios (`SiteScan.EndToEndTests`)
+
+| Test | Scenario |
+|---|---|
+| `SinglePage_WithNoLinks_RecordsSingleFetch` | Crawl a page with no outbound links |
+| `RootWithInternalLinks_DiscoversLinkedPages` | Follow links within the same host |
+| `OutOfScopeLink_IsSkipped` | Links to external domains are not followed |
+| `MaxDepth_ExceededPages_AreSkipped` | Pages beyond `MaxDepth` are skipped |
+| `DuplicateUrl_IsFetchedOnlyOnce` | Canonically identical URLs are deduped |
+| `RobotsDisallowed_PathIsSkipped` | `robots.txt` Disallow rules are respected |
+| `MaxPagesPerScan_StopsCrawlAfterLimit` | `MaxPagesPerScan` cap is enforced |
+| `NonHtmlContent_IsFetchedWithoutFollowingEmbeddedUrls` | Non-HTML resources are fetched but not link-extracted |
 
 ---
 
@@ -229,6 +259,7 @@ Always add project references in `.csproj` files, not assembly references. The d
 - Strongly typed options via the Options pattern
 - Infrastructure registers its own services via `DependencyInjection.cs` extension methods
 - `Program.cs` only calls extension methods — no raw `new` for services
+- `SnapshotPersister` takes `SnapshotOptions` directly (not `IOptions<SnapshotOptions>`) to keep the Application layer free of `Microsoft.Extensions.Options` dependency; DI resolves this by registering `SnapshotOptions` as a singleton via `.Value`
 
 ### Entity Framework
 
@@ -236,6 +267,14 @@ Always add project references in `.csproj` files, not assembly references. The d
 - Table names are `snake_case` (set via fluent API, not conventions)
 - JSON columns used for `SnapshotHeaders`
 - Value converters defined inline in `OnModelCreating`
+
+### Snapshot Persistence
+
+- `ISnapshotPersister` is the port; `SnapshotPersister` is the Infrastructure implementation
+- HTML pages: HTML bytes are stored (truncated to `MaxHtmlBytesPerPage` if needed) via `IHtmlSnapshotStorage`, SHA-256 hash computed over **stored** (possibly truncated) bytes
+- Non-HTML pages: metadata row only; no blob stored, no hash
+- Failed fetches: `FailedFetch` row written; no `PageSnapshot` row, no blob
+- Header allowlist (`UseHeaderAllowlist = true` by default): only `HeadersAllowlist.RuleHeaders` headers are persisted; set to `false` to store all response headers
 
 ---
 
@@ -262,6 +301,7 @@ Always add project references in `.csproj` files, not assembly references. The d
 | `Microsoft.AspNetCore.OpenApi` | 9.0.11 | OpenAPI generation |
 | `Swashbuckle.AspNetCore` | 6.6.0 | Swagger UI |
 | `Microsoft.EntityFrameworkCore` | 8.0.8 | ORM / persistence |
+| `Microsoft.EntityFrameworkCore.Sqlite` | 8.0.8 | SQLite provider for EF Core |
 | `Microsoft.Extensions.Http` | 10.0.1 | Named `HttpClient` factory |
 | `NUnit` | 4.2.2 | Test framework |
 | `coverlet.collector` | 6.0.2 | Code coverage |
@@ -279,8 +319,7 @@ Always add project references in `.csproj` files, not assembly references. The d
 
 ## What Does Not Exist Yet (Known Gaps)
 
-- No integration tests or end-to-end tests
-- No database migrations (EF Core schema not yet managed with migrations)
+- No database migrations (EF Core schema managed with `EnsureCreated()` — tech debt; tracked for future migration adoption)
 - No authentication/authorization on API endpoints
 - No background job / hosted service for running scans asynchronously
 - `README.md` is a placeholder — not yet populated
