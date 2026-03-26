@@ -1,5 +1,6 @@
 using NUnit.Framework;
 using SiteScan.Application.Crawling;
+using SiteScan.Application.Snapshots;
 using SiteScan.Domain.Scanning;
 using System;
 using System.Collections.Generic;
@@ -55,6 +56,15 @@ internal class SimpleScope : IScopePolicy
     public bool IsInScope(Uri candidateCanonical, Uri scanRootCanonical, out string? notes) { notes = null; return true; }
 }
 
+// No-op snapshot persister used by all tests in this file that exercise the
+// crawl engine without needing real snapshot storage.
+// NullSnapshotPersister.Instance (from Application) is the canonical version;
+// this alias keeps the intent explicit at each call site.
+internal static class NoopPersister
+{
+    public static ISnapshotPersister Instance => NullSnapshotPersister.Instance;
+}
+
 internal class FetcherReturning : IHttpFetcher
 {
     private readonly FetchResult _result;
@@ -91,7 +101,7 @@ public class CrawlerTests
         var fetcher = new FetcherReturning(new FetchResult(new Uri("https://example.com/"), new Uri("https://example.com/"), 200, "text/html", Array.Empty<byte>()));
         var links = new LinkExtractorReturning();
 
-        var crawler = new Crawler(options, canonical, scope, robots, politeness, fetcher, links, writer);
+        var crawler = new Crawler(options, canonical, scope, robots, politeness, fetcher, links, writer, NoopPersister.Instance);
 
         await crawler.RunAsync(ScanId.New(), new Uri("https://example.com/"), CancellationToken.None);
 
@@ -113,7 +123,7 @@ public class CrawlerTests
         var fetcher = new FetcherReturning(fetchResult);
         var links = new LinkExtractorReturning("/");
 
-        var crawler = new Crawler(options, canonical, scope, robots, politeness, fetcher, links, writer);
+        var crawler = new Crawler(options, canonical, scope, robots, politeness, fetcher, links, writer, NoopPersister.Instance);
 
         await crawler.RunAsync(ScanId.New(), new Uri("https://example.com/"), CancellationToken.None);
 
@@ -137,7 +147,7 @@ public class CrawlerTests
 
         var links = new LinkExtractorReturning("/should-not-be-called");
 
-        var crawler = new Crawler(options, canonical, scope, robots, politeness, fetcher, links, writer);
+        var crawler = new Crawler(options, canonical, scope, robots, politeness, fetcher, links, writer, NoopPersister.Instance);
 
         await crawler.RunAsync(ScanId.New(), new Uri("https://example.com/image.png"), CancellationToken.None);
 

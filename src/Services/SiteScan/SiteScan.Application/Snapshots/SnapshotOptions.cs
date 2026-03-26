@@ -13,4 +13,11 @@ public sealed class SnapshotOptions
 
     /// <summary>Where HTML is stored: "db" or "files" (or "blob").</summary>
     public string StorageMode { get; init; } = "files";
+
+    /// <summary>
+    /// Root directory for <c>FileHtmlSnapshotStorage</c>.
+    /// May be an absolute path or a path relative to the application working directory.
+    /// Only used when <see cref="StorageMode"/> is <c>"files"</c>.
+    /// </summary>
+    public string HtmlStoragePath { get; init; } = "html-snapshots";
 }
